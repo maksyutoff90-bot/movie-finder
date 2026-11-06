@@ -56,7 +56,7 @@ from .links import (
 )
 from .players import default_player, detect_players, open_file
 from .posters import PosterCache
-from .tmdb_sync import SyncJob, TMDBClient, TMDBError
+from .tmdb_sync import RECENT_WINDOW_DAYS, SyncJob, TMDBClient, TMDBError
 
 # --------------------------------------------------------------------- тема
 BG = "#0e1116"
@@ -79,8 +79,6 @@ FONT_H2 = (FONT, 20, "bold")
 PAGE_SIZE = 60
 
 # Новинки, которые догружает кнопка «Обновить новинки».
-RECENT_YEARS_FROM = 2023
-
 # Подписи кнопок для источников легального просмотра.
 WATCH_LABELS = {
     "Мосфильм": "Смотреть на Мосфильме",
@@ -4981,12 +4979,13 @@ class SyncWindow(tk.Toplevel):
         self.info = tk.Label(
             self,
             text=(
-                f"Ключ: …{key[-4:]}  ·  страниц на год: "
-                f"{3 if recent_only else app.cfg.pages_per_year}  ·  "
+                f"Ключ: …{key[-4:]}  ·  "
                 + (
-                    f"годы {RECENT_YEARS_FROM}–{SYNC_TO_YEAR} (только новинки)"
+                    f"окно: последние {RECENT_WINDOW_DAYS} дней  ·  "
+                    f"фильмов от {app.cfg.min_vote_count} голосов"
                     if recent_only
-                    else f"годы {SYNC_FROM_YEAR}–{SYNC_TO_YEAR}"
+                    else f"страниц на год: {app.cfg.pages_per_year}  ·  "
+                    f"годы {SYNC_FROM_YEAR}–{SYNC_TO_YEAR}"
                 )
                 if key
                 else "Ключ TMDb не задан. Откройте «Настройки» и вставьте API Key (v3)."
@@ -5061,7 +5060,7 @@ class SyncWindow(tk.Toplevel):
             language=self.app.cfg.language,
             pages=3 if self.recent_only else self.app.cfg.pages_per_year,
             min_votes=self.app.cfg.min_vote_count,
-            years=range(RECENT_YEARS_FROM, SYNC_TO_YEAR + 1) if self.recent_only else None,
+            recent_days=RECENT_WINDOW_DAYS if self.recent_only else None,
         )
         self.job.start()
         self.after(120, self._poll)

@@ -6,7 +6,7 @@ import queue
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
 import requests
@@ -16,6 +16,10 @@ from .database import DatabaseError, MovieDB, norm_countries, norm_list
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 USER_AGENT = "MovieFinder/1.0"
+
+# Кнопка «Обновить новинки»: окно свежих релизов и предел страниц.
+RECENT_WINDOW_DAYS = 90
+RECENT_MAX_PAGES = 15
 
 
 class TMDBError(RuntimeError):
@@ -101,6 +105,26 @@ class TMDBClient:
     def movie_details(self, movie_id: int) -> dict[str, Any]:
         return self.get(f"/movie/{movie_id}", append_to_response="credits")
 
+    def discover_recent(self, *, days: int, page: int, min_votes: int) -> dict[str, Any]:
+        """Свежие релизы окна: сортировка по дате выхода, а не по числу голосов.
+
+        `discover_year` отдаёт «топ по голосам» за год — это ровно те фильмы,
+        что уже есть в каталоге после полной синхронизации. Кнопке «Обновить
+        новинки» нужен обратный порядок: самые новые релизы, включая те, у
+        которых ещё мало голосов.
+        """
+        today = date.today()
+        start = today - timedelta(days=max(1, int(days)))
+        params: dict[str, Any] = {
+            "vote_count.gte": max(0, int(min_votes)),
+            "primary_release_date.gte": start.isoformat(),
+            "primary_release_date.lte": today.isoformat(),
+            "include_adult": "false",
+            "without_genres": "10770",
+            "page": page,
+        }
+        return self.get("/discover/movie", sort_by="primary_release_date.desc", **params)
+
     def collection_details(self, collection_id: int) -> dict[str, Any]:
         return self.get(f"/collection/{collection_id}")
 
@@ -170,6 +194,7 @@ class SyncJob:
         workers: int = 8,
         years: Iterable[int] | None = None,
         countries: str = "",
+        recent_days: int | None = None,
     ) -> None:
         self.db = db
         self.api_key = api_key
@@ -178,6 +203,7 @@ class SyncJob:
         self.min_votes = max(0, min_votes)
         self.workers = max(1, min(16, workers))
         self.countries = countries
+        self.recent_days = max(1, int(recent_days)) if recent_days else None
         self.years = list(years or range(SYNC_FROM_YEAR, SYNC_TO_YEAR + 1))
         self.queue: "queue.Queue[tuple]" = queue.Queue()
         self._stop = threading.Event()
@@ -237,29 +263,22 @@ class SyncJob:
         except DatabaseError as exc:
             self._emit("log", f"Предупреждение: не удалось убрать дубли — {exc}")
 
-        self._emit("log", "Ключ принят. Сканирую годы " f"{self.years[0]}–{self.years[-1]}.")
-
-        collected: dict[int, dict] = {}
-        total_years = len(self.years)
-        for index, year in enumerate(self.years, 1):
-            if self._stop.is_set():
-                self._emit("log", "Остановлено пользователем.")
-                return
-            for page in range(1, self.pages + 1):
-                data = client.discover_year(year, page, self.min_votes, self.countries)
-                results = data.get("results") or []
-                for movie in results:
-                    genre_ids = movie.get("genre_ids") or []
-                    if 10770 in genre_ids:  # телефильмы не нужны
-                        continue
-                    collected[int(movie["id"])] = movie
-                last_page = min(int(data.get("total_pages") or 1), self.pages)
-                if page >= last_page:
-                    break
+        if self.recent_days:
             self._emit(
-                "progress", index, total_years, f"Список фильмов: {year} ({len(collected)} шт.)"
+                "log",
+                f"Ключ принят. Сканирую новинки за последние {self.recent_days} дней.",
             )
+            collected = self._collect_recent(client)
+        else:
+            self._emit(
+                "log",
+                f"Ключ принят. Сканирую годы {self.years[0]}–{self.years[-1]}.",
+            )
+            collected = self._collect_years(client)
 
+        if self._stop.is_set():
+            self._emit("log", "Остановлено пользователем.")
+            return
         if not collected:
             self._emit("error", "TMDb не вернул ни одного фильма. Проверьте ключ и фильтры.")
             return
@@ -313,6 +332,52 @@ class SyncJob:
             self._emit("log", f"Предупреждение: не удалось записать дату обновления — {exc}")
 
         self._emit("done", added)
+
+    def _collect_years(self, client: TMDBClient) -> dict[int, dict]:
+        """Полная синхронизация: топ фильмов по годам."""
+        collected: dict[int, dict] = {}
+        total_years = len(self.years)
+        for index, year in enumerate(self.years, 1):
+            if self._stop.is_set():
+                break
+            for page in range(1, self.pages + 1):
+                data = client.discover_year(year, page, self.min_votes, self.countries)
+                self._merge(collected, data)
+                if page >= min(int(data.get("total_pages") or 1), self.pages):
+                    break
+            self._emit(
+                "progress", index, total_years,
+                f"Список фильмов: {year} ({len(collected)} шт.)",
+            )
+        return collected
+
+    def _collect_recent(self, client: TMDBClient) -> dict[int, dict]:
+        """Новинки: свежие релизы окна по дате выхода."""
+        collected: dict[int, dict] = {}
+        for page in range(1, RECENT_MAX_PAGES + 1):
+            if self._stop.is_set():
+                break
+            data = client.discover_recent(
+                days=self.recent_days or RECENT_WINDOW_DAYS,
+                page=page,
+                min_votes=self.min_votes,
+            )
+            self._merge(collected, data)
+            total_pages = min(int(data.get("total_pages") or 1), RECENT_MAX_PAGES)
+            self._emit(
+                "progress", page, max(total_pages, page),
+                f"Новинки: страница {page} ({len(collected)} шт.)",
+            )
+            if page >= total_pages:
+                break
+        return collected
+
+    @staticmethod
+    def _merge(collected: dict[int, dict], data: dict[str, Any]) -> None:
+        for movie in data.get("results") or []:
+            if 10770 in (movie.get("genre_ids") or []):
+                continue  # телефильмы не нужны
+            collected[int(movie["id"])] = movie
 
     def _fetch_details(self, client: TMDBClient, movie_id: int) -> dict[str, Any] | None:
         if self._stop.is_set():
