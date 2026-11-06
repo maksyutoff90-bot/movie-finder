@@ -1,0 +1,35 @@
+# --- установленное приложение и личные данные (машино-зависимое) ---
+/_internal/
+/Movie Finder.exe
+/Movie Finder.exe.old
+/config.json
+/source/config.json
+/data/
+/backups/
+
+# --- сборка ---
+/source/dist_new/
+/source/dist/
+/dist*/
+*.spec
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- базы, постеры и логи ---
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# --- ОС ---
+Thumbs.db
+desktop.ini
+.DS_Store

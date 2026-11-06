@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+extend-exclude = ["dist_new", "build", "dist-safe*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM"]
+ignore = [
+    "E501",   # длинные строки: русские подписи и SQL-запросы не переносим
+    "SIM105", # contextlib.suppress — косметика, оставлено на потом
+    "SIM102", # вложенные if в диалогах читаются лучше
+    "SIM117", # вложенные with в тестах
+    "B905",   # zip(strict=) требует Python 3.10, а заявлена поддержка 3.9
+]
+
+[tool.mypy]
+# Заявлен Python 3.9+, но mypy 2.x не умеет цель 3.9 — проверяем на 3.10.
+python_version = "3.10"
+files = [
+    "movie_search/database.py",
+    "movie_search/config.py",
+    "movie_search/library.py",
+    "movie_search/franchises.py",
+]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
