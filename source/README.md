@@ -139,6 +139,7 @@ python tools/build_exe.py dist-safe
 ```
 main.py                     точка входа (обычный запуск, --selftest, --shot)
 run.bat                     запуск в один клик (Windows)
+update.bat                  обновление сборки с откатом при сбое
 dist/Movie Finder/          готовая сборка: exe + data/ рядом
 movie_search/
     ui.py                   интерфейс: карточки, фильтры, окно деталей, настройки
@@ -148,6 +149,7 @@ movie_search/
     diagnostics.py          самопроверка и снимок окна (--selftest, --shot)
     const.py                справочники жанров, стран, жанровые id TMDb
     config.py               пути и настройки (config.json)
+tests/                      юнит-тесты (pytest), без сети и без реальной базы
 tools/
     build_catalog.py        сборка офлайн-каталога из Википедии
     catalog_seed.py         список фильмов для офлайн-каталога
@@ -159,6 +161,11 @@ tools/
 data/
     movies.db               база фильмов
     posters/                файлы постеров
+pytest.ini, conftest.py     настройка тестов (пути, маркер gui)
+pyproject.toml              настройки ruff и mypy
+requirements.txt            зависимости запуска (точные версии)
+requirements.lock           полный набор версий для сборки
+requirements-dev.txt        тесты, линтер, типы
 ```
 
 ## Как устроен поиск
@@ -360,11 +367,29 @@ python tools/screenshot.py out.png 8000 "Начало"   :: снимок окн�
 Юнит-тесты (без интерфейса) запускаются одной командой:
 
 ```bat
-python -m pytest tools -q          :: база, фильтры, личные данные, поиск
+python -m pytest -q                  :: все тесты, включая окна
+python -m pytest -m "not gui" -q     :: только без интерфейса
+python -m pytest --cov=movie_search  :: покрытие
 ```
 
-Зависимости для сборки и тестов — в `requirements-dev.txt` (включает
-`requirements.txt`, PyInstaller и pytest с зафиксированными версиями).
+## Разработка: линтер, типы, CI
+
+```bat
+pip install -r requirements-dev.txt
+ruff check .                         :: E, F, I, B, SIM
+mypy                                 :: типы для database/config/library/franchises
+```
+
+Настройки лежат в `pyproject.toml` (ruff и mypy) и `pytest.ini` (пути, маркер
+`gui`). Тесты не ходят в сеть и работают на временных базах.
+
+В репозитории есть CI (`.github/workflows/ci.yml`): на Ubuntu — `ruff` и `mypy`,
+на Windows — тесты без GUI с покрытием. GUI-тесты запускаются локально
+(`python -m pytest -q`), потому что им нужен рабочий стол Windows.
+
+Версии зависимостей закреплены: `requirements.txt` — запуск, `requirements.lock` —
+сборка exe (PyInstaller и его зависимости), `requirements-dev.txt` — тесты и
+проверки.
 
 ## Заметки
 
