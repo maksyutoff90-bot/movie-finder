@@ -48,7 +48,10 @@ class ConfigPathTests(unittest.TestCase):
             config = self._frozen_config()
 
         self.assertEqual(config.api_key, "parent-test-key")
-        self.assertEqual(config.parent_path, self.parent_path)
+        # resolve(): на CI временная папка приходит в коротком 8.3-виде (RUNNER~1).
+        self.assertEqual(
+            config.parent_path.resolve(), self.parent_path.resolve()
+        )
 
     def test_local_config_takes_priority_over_parent_config(self) -> None:
         self._write_config(self.parent_path, tmdb_api_key="parent-test-key")
